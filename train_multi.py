@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 import argparse
 from tqdm import tqdm
-import cv2
 import lpips
 from torchvision import transforms
 import torchvision
@@ -51,18 +50,6 @@ def list_identities(data_root):
         # only keep identities that have obj folder
         if os.path.isdir(os.path.join(p, "obj")):
             ids.append(name)
-
-    # ids = [identity for identity in ids if identity in os.listdir('/nfs/usr/jluo2/dev2-root/out_eval-all-t9')]
-
-    import socket
-    if socket.gethostname() == 'jiahao-dev-4node-worker-0':
-        ids = ids[0::4]
-    elif socket.gethostname() == 'jiahao-dev-4node-worker-1':
-        ids = ids[1::4]
-    elif socket.gethostname() == 'jiahao-dev-4node-worker-2':
-        ids = ids[2::4]
-    elif socket.gethostname() == 'jiahao-dev-4node-worker-3':
-        ids = ids[3::4]
 
     return ids
 
@@ -211,8 +198,8 @@ def train_one_identity(args, lp, op, pp, percep_module, idname, rank=0):
 
         image = render_pkg["render"]
 
-        # mesh = Meshes(verts=verts_final[:, :-DeformModel.num_samples], faces=DeformModel.faces_idx[None],
-        #             textures=TexturesVertex(verts_features=DeformModel.uv_features_dc[:, :-DeformModel.num_samples]))
+        mesh = Meshes(verts=verts_final[:, :-DeformModel.num_samples], faces=DeformModel.faces_idx[None],
+                    textures=TexturesVertex(verts_features=DeformModel.uv_features_dc[:, :-DeformModel.num_samples]))
         # mesh_image = renderer.render_mesh(mesh, background, viewpoint_cam.cam_dist, viewpoint_cam.elev, viewpoint_cam.azim)
 
         # loss_deform = huber_loss(image, viewpoint_cam.original_image, 0.1) + 0.05 * feature_loss(image, viewpoint_cam.original_image) \
@@ -261,13 +248,6 @@ def train_one_identity(args, lp, op, pp, percep_module, idname, rank=0):
 
             if iteration % 500 == 0:
                 print(f"[rank {rank}] {idname} step: {iteration}, loss: {loss.item():.5f}")
-
-            # if iteration % 500 == 0 and iteration <= rigid_fit_steps:
-            if False:
-                gt = viewpoint_cam.original_image
-                recon = image
-                out_final = torch.cat((gt, recon), dim=2)
-                torchvision.utils.save_image(out_final, os.path.join(train_dir, f"{iteration}.jpg"))
 
             # if iteration % 500 == 0 and iteration >= rigid_fit_steps:
             if iteration % 500 == 0:
@@ -329,11 +309,10 @@ if __name__ == "__main__":
 
     parser.add_argument('--seed', type=int, default=0, help='Random seed.')
     parser.add_argument('--idname', type=str, default='', help='Single id name. If empty, process all IDs split by torchrun ranks.')
-    # parser.add_argument('--data_root', type=str, default='../trellis2_gpt_textured_test_t2bs')
-    parser.add_argument('--data_root', type=str, default='../trellis2_gpt_5kto10k_textured_test_t2bs')
+    parser.add_argument('--data_root', type=str, default='assets')
     parser.add_argument('--run_log', type=str, default='0000')
     parser.add_argument('--image_res', type=int, default=512, help='image resolution')
-    parser.add_argument("--start_checkpoint", type=str, default='ckpt/chkpnt25000.pth')
+    parser.add_argument("--start_checkpoint", type=str, default=None)
     parser.add_argument('--n_views', type=int, default=15)
     parser.add_argument('--deform_fc', action='store_true')
     parser.add_argument('--k', type=int, default=10)
