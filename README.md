@@ -15,8 +15,10 @@ mesh reproduce multi-view renders of each expression. The result is a consistent
 model from which registered meshes can be exported.
 
 > **Scope:** This repo releases only the deformable Gaussian splatting / registration stage.
-> It assumes you already have textured per-expression meshes (the mesh-generation stage is not
+> We use per-expression meshes to generate multi-view videos (the mesh-generation stage is not
 > included). One example identity is provided so the code runs out of the box.
+> To use custom multi-view videos, generate new camera parameters with **define_camera.py**
+> based on the camera pose associated with each view of the input multi-view video.
 
 ---
 
