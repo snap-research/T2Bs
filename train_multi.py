@@ -198,10 +198,6 @@ def train_one_identity(args, lp, op, pp, percep_module, idname, rank=0):
 
         image = render_pkg["render"]
 
-        mesh = Meshes(verts=verts_final[:, :-DeformModel.num_samples], faces=DeformModel.faces_idx[None],
-                    textures=TexturesVertex(verts_features=DeformModel.uv_features_dc[:, :-DeformModel.num_samples]))
-        # mesh_image = renderer.render_mesh(mesh, background, viewpoint_cam.cam_dist, viewpoint_cam.elev, viewpoint_cam.azim)
-
         # loss_deform = huber_loss(image, viewpoint_cam.original_image, 0.1) + 0.05 * feature_loss(image, viewpoint_cam.original_image) \
         #             + huber_loss(image, mesh_image, 0.1)
         loss_deform = huber_loss(image, viewpoint_cam.original_image, 0.1) + 0.05 * feature_loss(image, viewpoint_cam.original_image)
@@ -212,11 +208,16 @@ def train_one_identity(args, lp, op, pp, percep_module, idname, rank=0):
         loss_reg = 0
 
         if args.use_loss_n:
+            # Per-vertex normals over the full deformed point set (mesh verts + sampled
+            # points); faces only reference the mesh verts, so sampled points get zero
+            # normals, keeping nv aligned with verts_final.
+            mesh_full = Meshes(verts=verts_final, faces=DeformModel.faces_idx[None, ...],
+                        textures=TexturesVertex(verts_features=DeformModel.uv_features_dc))
             if args.inverse_n:
-                nv = -mesh.verts_normals_packed()
+                nv = -mesh_full.verts_normals_packed()
             else:
-                nv = mesh.verts_normals_packed()
-                
+                nv = mesh_full.verts_normals_packed()
+
             meshn = Meshes(verts=verts_final, faces=DeformModel.faces_idx[None, ...],
                         textures=TexturesVertex(verts_features=nv[None]/2+0.5))
             meshn_image = renderer.render_mesh(meshn, background, viewpoint_cam.cam_dist, viewpoint_cam.elev, viewpoint_cam.azim)
