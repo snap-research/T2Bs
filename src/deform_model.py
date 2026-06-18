@@ -79,7 +79,6 @@ class Deform_Model(nn.Module):
         self.faces_idx = faces.verts_idx.to(self.device)
         self.texture_map_raw = next(iter(aux.texture_images.values())).to(self.device)
         self.texture_map = transforms.Resize((512, 512))(self.texture_map_raw.permute(2, 0, 1))
-        torchvision.utils.save_image(self.texture_map, 'texture.jpg')       # # # # name of the texture map
         uv_coords = aux.verts_uvs[None, ...]
         uv_coords = uv_coords * 2 - 1
         uv_coords[..., 1] = - uv_coords[..., 1]

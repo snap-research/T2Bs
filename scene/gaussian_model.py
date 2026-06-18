@@ -17,7 +17,6 @@ import os
 from utils.system_utils import mkdir_p
 from plyfile import PlyData, PlyElement
 from utils.sh_utils import RGB2SH
-# from simple_knn._C import distCUDA2
 from pytorch3d.ops import knn_points
 from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation, quatProduct_batch
@@ -200,7 +199,6 @@ class GaussianModel:
         # dist2 = torch.zeros((points.shape[0], 3), device=self.device) + 0.015
         # scales = torch.log(dist2)
         # scales = torch.log(torch.ones_like(points))
-        # dist2 = torch.clamp_min(distCUDA2(points), 0.0000001)
         # scales = torch.log(torch.sqrt(dist2))[...,None].repeat(1, 3)
         rots = torch.zeros((points.shape[0], 4), device=self.device)
         rots[:, 0] = 1
@@ -279,7 +277,6 @@ class GaussianModel:
     #     self._xyz = points
     #     self._features_dc = features
     #     self._rotation = self._rotation_base
-    #     dist2 = torch.clamp_min(distCUDA2(points), 0.0000001)
     #     self._scaling = torch.log(torch.sqrt(dist2))[...,None].repeat(1, 3)
     #     self._opacity = torch.ones_like(self._opacity)
 
@@ -290,7 +287,6 @@ class GaussianModel:
             self._features_rest = torch.zeros_like(self._features_rest0)
             self._rotation = self._rotation_base
             dist2 = torch.clamp_min(knn_points(points[None,...], points[None,...], K=1).dists.squeeze()**2, 0.0000001)
-            # dist2 = torch.clamp_min(distCUDA2(points), 0.0000001)
             self._scaling = torch.log(torch.sqrt(dist2))[...,None].repeat(1, 3)
             self._opacity = torch.ones_like(self._opacity)
         else:
@@ -299,7 +295,7 @@ class GaussianModel:
                 self._features_dc = features[mask]
                 self._features_rest = torch.zeros_like(self._features_rest0)[mask]
                 self._rotation = self._rotation_base[mask]
-                dist2 = torch.clamp_min(distCUDA2(points), 0.0000001)
+                dist2 = torch.clamp_min(knn_points(points[None, ...], points[None, ...], K=1).dists.squeeze()**2, 0.0000001)
                 self._scaling = torch.log(torch.sqrt(dist2))[...,None].repeat(1, 3)[mask]
                 self._opacity = torch.ones_like(self._opacity)[mask]
             else:
@@ -307,7 +303,7 @@ class GaussianModel:
                 self._features_dc = features[mask][mask1]
                 self._features_rest = torch.zeros_like(self._features_rest0)[mask][mask1]
                 self._rotation = self._rotation_base[mask][mask1]
-                dist2 = torch.clamp_min(distCUDA2(points), 0.0000001)
+                dist2 = torch.clamp_min(knn_points(points[None, ...], points[None, ...], K=1).dists.squeeze()**2, 0.0000001)
                 self._scaling = torch.log(torch.sqrt(dist2))[...,None].repeat(1, 3)[mask][mask1]
                 self._opacity = torch.ones_like(self._opacity)[mask][mask1]
 
