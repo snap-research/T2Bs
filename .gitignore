@@ -10,3 +10,13 @@ assets/*/runs/
 core.*
 texture.jpg
 .DS_Store
+
+# Local editor / agent settings
+.claude/
+
+# Regenerated k-means / keypoint caches (recomputed on each run)
+kpts_*.pt
+kpts_*.ply
+
+# Internal planning/design notes (not part of the public release)
+docs/superpowers/
