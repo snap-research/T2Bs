@@ -209,10 +209,16 @@ if __name__ == "__main__":
         # loss_reg = 0
 
         if args.use_loss_n:
+            # Per-vertex normals over the full deformed point set (mesh verts + sampled
+            # points). Faces only reference the mesh verts, so the sampled points get zero
+            # normals; this keeps nv aligned with verts_final for both meshn and the
+            # gaussian color update below.
+            mesh_full = Meshes(verts=verts_final, faces=DeformModel.faces_idx[None, ...],
+                        textures=TexturesVertex(verts_features=DeformModel.uv_features_dc))
             if args.inverse_n:
-                nv = -mesh.verts_normals_packed()
+                nv = -mesh_full.verts_normals_packed()
             else:
-                nv = mesh.verts_normals_packed()
+                nv = mesh_full.verts_normals_packed()
 
             meshn = Meshes(verts=verts_final, faces=DeformModel.faces_idx[None, ...],
                         textures=TexturesVertex(verts_features=nv[None]/2+0.5))
