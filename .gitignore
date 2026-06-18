@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+*.so
+runs/
+assets/*/runs/
+*.pth
+core.*
+texture.jpg
+.DS_Store
