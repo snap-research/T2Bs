@@ -137,14 +137,6 @@ def train_one_identity(args, lp, op, pp, percep_module, idname, rank=0):
         meshf0 = load_objs_as_meshes([os.path.join(asset_dir, frame_ids[f], 'textured.obj')], device=args.device)
 
         if args.normalize_mesh:
-            # verts = meshf0.verts_packed()
-            # verts = verts - verts.mean(dim=0, keepdim=True)
-            # max_dist = torch.cdist(verts, verts).max()
-            # verts = verts / max_dist * args.s
-            # translation = torch.tensor([args.tx, args.ty, args.tz]).to(args.device)
-            # verts = verts + translation
-            # meshf0 = meshf0.update_padded(verts.unsqueeze(0).to(args.device))
-
             verts = DeformModel.normalize_like_trimesh_batched(meshf0.verts_packed()[None, None])
             meshf0 = meshf0.update_padded(verts[0].to(meshf0.device))
 

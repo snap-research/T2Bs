@@ -132,14 +132,6 @@ if __name__ == "__main__":
         meshf0 = load_objs_as_meshes([os.path.join(asset_dir, frame_ids[f], 'textured.obj')], device=args.device)
 
         if args.normalize_mesh:
-            # verts = meshf0.verts_packed()
-            # verts = verts - verts.mean(dim=0, keepdim=True)
-            # max_dist = torch.cdist(verts, verts).max()
-            # verts = verts / max_dist * args.s
-            # translation = torch.tensor([args.tx, args.ty, args.tz]).to(args.device)
-            # verts = verts + translation
-            # meshf0 = meshf0.update_padded(verts.unsqueeze(0).to(args.device))
-
             verts = DeformModel.normalize_like_trimesh_batched(meshf0.verts_packed()[None, None])
             meshf0 = meshf0.update_padded(verts[0].to(meshf0.device))
 
@@ -284,16 +276,7 @@ if __name__ == "__main__":
 
                 torchvision.utils.save_image(out_final, os.path.join(train_dir, f"{iteration}.jpg"))
             
-            # # # save checkpoint
-            # if iteration % 1000 == 0 and iteration > first_iter:
-            #     print("\n[ITER {}] Saving Checkpoint".format(iteration))
-            #     torch.save((DeformModel.capture(), gaussians.capture(), iteration), model_dir + "/chkpnt" + str(iteration) + ".pth")
-            #     saved_chkpt_list = [30000, 50000]
-            #     if iteration - 1000 != first_iter and iteration not in saved_chkpt_list:
-            #         os.remove(model_dir + "/chkpnt" + str(iteration-1000) + ".pth")
-
             # # save registered mesh
-            # if iteration % 5000 == 0 and iteration > rigid_fit_steps:
             if iteration % 5000 == 0:
                 _, faces00, aux00 = load_obj(os.path.join(data_dir, f'obj/{args.neutral}/textured.obj'), load_textures=True)
                 texture_image = torchvision.io.read_image(os.path.join(data_dir, f'obj/{args.neutral}/material.png')).float().permute(1, 2, 0) / 255.0  # (H, W, 3)
