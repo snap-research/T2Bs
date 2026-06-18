@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 import argparse
 from tqdm import tqdm
-import cv2
 import lpips
 from torchvision import transforms
 import torchvision
@@ -24,68 +23,6 @@ from utils.loss_utils import huber_loss
 from utils.general_utils import normalize_for_percep, verts2D, verts2D_visu, verts2D_img, arap_loss, save_obj_colorful_point_cloud
 from utils.sh_utils import RGB2SH
 from objrenderer.renderer import OBJRenderer
-
-import io
-import contextlib
-import warnings
-
-RASTER_OVERFLOW_PAT = "Bin size was too small in the coarse rasterization phase"
-
-def call_render_break_on_overflow(render_fn, *args, **kwargs):
-    """
-    Detect overflow whether it is emitted as a Python warning OR printed to stderr.
-    Returns: (out, overflow: bool, debug_text: str)
-    """
-    stderr_buf = io.StringIO()
-
-    with contextlib.redirect_stderr(stderr_buf):
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            out = render_fn(*args, **kwargs)
-
-    warn_hit = any(RASTER_OVERFLOW_PAT in str(x.message) for x in w)
-    stderr_text = stderr_buf.getvalue()
-    stderr_hit = (RASTER_OVERFLOW_PAT in stderr_text)
-
-    overflow = warn_hit or stderr_hit
-    return out, overflow, (stderr_text if stderr_hit else "")
-
-import os, sys, tempfile, warnings
-
-RASTER_OVERFLOW_PAT = "Bin size was too small in the coarse rasterization phase"
-
-def call_and_detect_overflow_fd2(fn, *args, **kwargs):
-    """
-    Captures *OS-level* stderr (FD=2), which includes C++/CUDA prints.
-    Returns: (out, overflow: bool, captured_tail: str)
-    """
-    # Create a temp file to store FD2 output
-    tmp = tempfile.TemporaryFile(mode="w+t")
-    old_fd2 = os.dup(2)             # duplicate current stderr FD
-    os.dup2(tmp.fileno(), 2)        # redirect FD2 -> tmp
-
-    try:
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            out = fn(*args, **kwargs)
-    finally:
-        os.dup2(old_fd2, 2)         # restore FD2
-        os.close(old_fd2)
-
-    # Read captured stderr
-    tmp.seek(0)
-    stderr_text = tmp.read()
-    tmp.close()
-
-    warn_hit = any(RASTER_OVERFLOW_PAT in str(x.message) for x in w)
-    stderr_hit = (RASTER_OVERFLOW_PAT in stderr_text)
-    overflow = warn_hit or stderr_hit
-
-    tail = ""
-    if stderr_hit:
-        tail = stderr_text[-500:]   # last 500 chars for debugging
-
-    return out, overflow, tail
 
 def set_random_seed(seed):
     r"""Set random seeds for everything.
@@ -110,8 +47,9 @@ if __name__ == "__main__":
     parser.add_argument('--idname', type=str, default='dog', help='id name')
     parser.add_argument('--log', type=str, default='0000')
     parser.add_argument('--image_res', type=int, default=512, help='image resolution')
-    parser.add_argument("--start_checkpoint", type=str, default='ckpt/chkpnt25000.pth')
+    parser.add_argument("--start_checkpoint", type=str, default=None)
     parser.add_argument('--n_views', type=int, default=15)
+    parser.add_argument('--view', type=int, default=12, help='Camera view index used during training.')
     parser.add_argument('--deform_fc', action='store_true')
     parser.add_argument('--k', type=int, default=10)
     parser.add_argument('--num_clusters', type=int, default=5000)
@@ -238,99 +176,65 @@ if __name__ == "__main__":
 
         # random frames ...
         frame = random.randint(0, len(frame_ids) - 1)
-        # view  = random.randint(0, args.n_views-1)
-        # view  = random.randint(7, 17)
-        view  = 12
+        view = args.view
         viewpoint_cam = viewpoint_stack[frame][view]
         condition = viewpoint_cam.uid_pe
         if args.view_independent:
             condition[:, 64:] = 0
 
-        # if iteration < rigid_fit_steps:
-        if False:
+        verts_final, rot_delta, scale_coef, features_dc_final, verts_deformed, opacity_final = DeformModel.decode(
+            condition, args.deform_fc, viewpoint_stack[0][7].visibility_mask, use_LBS=args.noLBS
+        )
+        gaussians.update_everything_cat(
+            verts_final[0], rot_delta[0], scale_coef[0],
+            RGB2SH(features_dc_final.permute(1, 0, 2)),
+            None, opacity_final[0]
+        )
 
-            viewpoint_cam = viewpoint_stack[0][view]
+        render_pkg = render(viewpoint_cam, gaussians, ppt, background)
 
-            gaussians._scaling_base.requires_grad = True
-            gaussians._rotation_base.requires_grad = True
+        image = render_pkg["render"]
 
-            # verts_final, _, _, _, _, _ = DeformModel.decode(condition, args.deform_fc, use_LBS=args.noLBS)
-            gaussians.update_xyz_feature(DeformModel.uv_vertices_shape[0], RGB2SH(DeformModel.uv_features_dc.permute(1, 0, 2)))
+        mesh = Meshes(verts=verts_final[:, :-DeformModel.num_samples], faces=DeformModel.faces_idx[None],
+                    textures=TexturesVertex(verts_features=DeformModel.uv_features_dc[:, :-DeformModel.num_samples]))
+        mesh_image = renderer.render_mesh(mesh, background, viewpoint_cam.cam_dist, viewpoint_cam.elev, viewpoint_cam.azim)
 
-            render_pkg, overflow, dbg = call_render_break_on_overflow(render, viewpoint_cam, gaussians, ppt, background)
+        loss_deform = huber_loss(image, viewpoint_cam.original_image, 0.1) + 0.05 * feature_loss(image, viewpoint_cam.original_image) \
+                    + huber_loss(image, mesh_image, 0.1)
+        # loss_deform = huber_loss(image, viewpoint_cam.original_image, 0.1) + 0.05 * feature_loss(image, viewpoint_cam.original_image)
+        # loss_deform = huber_loss(mesh_image, mesh_image, 0.1)
 
-            image = render_pkg["render"]
-            # reg, _ = chamfer_distance(verts_final, meshes[frame].verts_padded())
-            loss = huber_loss(image, viewpoint_cam.original_image, 0.1) \
-                 + 0.05 * feature_loss(image, viewpoint_cam.original_image)
+        laplace_smooth = pytorch3d.loss.mesh_laplacian_smoothing(mesh)
+        loss_reg = laplace_smooth
+        # loss_reg = 0
 
-        else:
-            verts_final, rot_delta, scale_coef, features_dc_final, verts_deformed, opacity_final = DeformModel.decode(
-                condition, args.deform_fc, viewpoint_stack[0][7].visibility_mask, use_LBS=args.noLBS
-            )
-            gaussians.update_everything_cat(
-                verts_final[0], rot_delta[0], scale_coef[0],
-                RGB2SH(features_dc_final.permute(1, 0, 2)),
-                None, opacity_final[0]
-            )
-
-            render_pkg, overflow, dbg = call_render_break_on_overflow(render, viewpoint_cam, gaussians, ppt, background)
-            if overflow:
-                print(f"[WARN] Raster bin overflow at iter={iteration} -> breaking.")
-                if dbg:
-                    print("[stderr snippet]", dbg[-300:])  # last 300 chars
-                break
-
-            image = render_pkg["render"]
-
-            mesh = Meshes(verts=verts_final[:, :-30_000], faces=DeformModel.faces_idx[None],
-                        textures=TexturesVertex(verts_features=DeformModel.uv_features_dc[:, :-30_000]))
-            mesh_image, overflow, tail = call_and_detect_overflow_fd2(
-                renderer.render_mesh, mesh, background, viewpoint_cam.cam_dist, viewpoint_cam.elev, viewpoint_cam.azim
-            )
-            if overflow:
-                print(f"[WARN] Raster bin overflow at iter={iteration} -> breaking.")
-                break
-
-            loss_deform = huber_loss(image, viewpoint_cam.original_image, 0.1) + 0.05 * feature_loss(image, viewpoint_cam.original_image) \
-                        + huber_loss(image, mesh_image, 0.1)
-            # loss_deform = huber_loss(image, viewpoint_cam.original_image, 0.1) + 0.05 * feature_loss(image, viewpoint_cam.original_image)
-            # loss_deform = huber_loss(mesh_image, mesh_image, 0.1)
-
-            laplace_smooth = pytorch3d.loss.mesh_laplacian_smoothing(mesh)
-            loss_reg = laplace_smooth
-            # loss_reg = 0
-
-            if args.use_loss_n:
-                if args.inverse_n:
-                    nv = -mesh.verts_normals_packed()
-                else:
-                    nv = mesh.verts_normals_packed()
-                    
-                meshn = Meshes(verts=verts_final, faces=DeformModel.faces_idx[None, ...],
-                            textures=TexturesVertex(verts_features=nv[None]/2+0.5))
-                meshn_image = renderer.render_mesh(meshn, background, viewpoint_cam.cam_dist, viewpoint_cam.elev, viewpoint_cam.azim)
-
-                gaussians.update_everything_cat(verts_final[0], rot_delta[0], scale_coef[0], RGB2SH((nv[:, None]+1)/2), None, opacity_final[0])
-
-                render_pkg, overflow, dbg = call_render_break_on_overflow(render, viewpoint_cam, gaussians, ppt, background)
-                if overflow:
-                    print(f"[WARN] Raster bin overflow at iter={iteration} -> breaking.")
-                    break
-
-                image_nv = render_pkg["render"]
-
-                loss_n = huber_loss(image_nv, viewpoint_cam.normal_image, 0.1) + 0.005 * feature_loss(image_nv, viewpoint_cam.normal_image) \
-                    + huber_loss(image_nv, meshn_image, 0.1)
+        if args.use_loss_n:
+            if args.inverse_n:
+                nv = -mesh.verts_normals_packed()
             else:
-                loss_n = 0
-                image_nv = None
+                nv = mesh.verts_normals_packed()
 
-            # reg, _ = chamfer_distance(verts_final, meshes[frame].verts_padded())
+            meshn = Meshes(verts=verts_final, faces=DeformModel.faces_idx[None, ...],
+                        textures=TexturesVertex(verts_features=nv[None]/2+0.5))
+            meshn_image = renderer.render_mesh(meshn, background, viewpoint_cam.cam_dist, viewpoint_cam.elev, viewpoint_cam.azim)
 
-            # loss = loss_deform + loss_reg + loss_n + 0.1*reg
-            loss = loss_deform + loss_reg + loss_n
-            loss.backward()
+            gaussians.update_everything_cat(verts_final[0], rot_delta[0], scale_coef[0], RGB2SH((nv[:, None]+1)/2), None, opacity_final[0])
+
+            render_pkg = render(viewpoint_cam, gaussians, ppt, background)
+
+            image_nv = render_pkg["render"]
+
+            loss_n = huber_loss(image_nv, viewpoint_cam.normal_image, 0.1) + 0.005 * feature_loss(image_nv, viewpoint_cam.normal_image) \
+                + huber_loss(image_nv, meshn_image, 0.1)
+        else:
+            loss_n = 0
+            image_nv = None
+
+        # reg, _ = chamfer_distance(verts_final, meshes[frame].verts_padded())
+
+        # loss = loss_deform + loss_reg + loss_n + 0.1*reg
+        loss = loss_deform + loss_reg + loss_n
+        loss.backward()
 
         with torch.no_grad():
             # Optimizer step
@@ -392,7 +296,7 @@ if __name__ == "__main__":
                     obj_path  = f'{obj_dir}/{frame_ids[iteration]}.obj'
                     pytorch3d.io.save_obj(
                         f=obj_path,
-                        verts=verts_final[0, :-30_000],                    # (V, 3) vertices of the new mesh
+                        verts=verts_final[0, :-DeformModel.num_samples],                    # (V, 3) vertices of the new mesh
                         faces=faces00.verts_idx,       # (F, 3) face indices (same as reference)
                         verts_uvs=aux00.verts_uvs,          # (Vt, 2) UV coordinates from reference
                         faces_uvs=faces00.textures_idx,     # (F, 3) UV indices from reference
